@@ -495,6 +495,12 @@ jobs:
           set -euo pipefail
           # Each stage announces itself, so a failure in the log says where it stopped, and no
           # pipeline ends in `head` (a closed pipe is exit 141 under pipefail).
+          fail() {
+            # Annotations survive where the log needs a sign-in.
+            while IFS= read -r line; do echo "::error::$line"; done <<< "$(tail -25 verify.log)"
+            exit 1
+          }
+          trap 'status=$?; if [[ $status -ne 0 ]]; then fail; fi' ERR
           echo "stage: download the release's own files"
           mkdir -p published
           gh release download "$TAG" --dir published
@@ -535,7 +541,7 @@ jobs:
   report:
     # Job logs are only readable while signed in; a commit comment is not. When a build fails,
     # this posts the first compiler errors of every platform that failed.
-    needs: [plan, game, launcher]
+    needs: [plan, game, launcher, publish]
     if: always() && (needs.game.result == 'failure' || needs.launcher.result == 'failure' || needs.publish.result == 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 10
