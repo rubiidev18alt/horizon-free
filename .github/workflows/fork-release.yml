@@ -496,8 +496,10 @@ jobs:
           # Each stage announces itself, so a failure in the log says where it stopped, and no
           # pipeline ends in `head` (a closed pipe is exit 141 under pipefail).
           fail() {
-            # Annotations survive where the log needs a sign-in.
-            while IFS= read -r line; do echo "::error::$line"; done <<< "$(tail -25 verify.log)"
+            # Annotations survive where the log needs a sign-in: the stage, then the tail.
+            stage=$(grep -o 'check:[^ ]*: [^:]*' verify.log | tail -1 || true)
+            echo "::error::the release check stopped at: ${stage:-unknown}"
+            while IFS= read -r line; do echo "::error::$line"; done <<< "$(tail -40 verify.log)"
             exit 1
           }
           trap 'status=$?; if [[ $status -ne 0 ]]; then fail; fi' ERR
@@ -520,16 +522,21 @@ jobs:
             [[ -n "$folder" ]] || { echo "::error::$asset holds no folder"; exit 1; }
             echo "$asset -> $folder"
             ls "$folder"
+            echo "check: $asset: folder"
             if [[ "$asset" == horizon-server-* ]]; then
               # A server folder holds the engine (the client without audio or controllers),
               # horizon-server and horizon-prepare (xtask package-server).
               for program in horizon-engine horizon-server horizon-prepare; do
+                echo "check: $asset: $program"
                 [[ -f "$folder/$program" ]] || { echo "::error::$asset has no $program"; exit 1; }
               done
             else
+              echo "check: $asset: horizon-client"
               [[ -f "$folder/horizon-client" || -f "$folder/horizon-client.exe" ]] \
                 || { echo "::error::$asset has no horizon-client"; exit 1; }
+              echo "check: $asset: PLAY.txt"
               [[ -f "$folder/PLAY.txt" ]] || { echo "::error::$asset has no PLAY.txt"; exit 1; }
+              echo "check: $asset: horizon-ctl"
               [[ -f "$folder/horizon-ctl" || -f "$folder/horizon-ctl.exe" ]] \
                 || { echo "::error::$asset has no horizon-ctl"; exit 1; }
             fi
