@@ -520,10 +520,19 @@ jobs:
             [[ -n "$folder" ]] || { echo "::error::$asset holds no folder"; exit 1; }
             echo "$asset -> $folder"
             ls "$folder"
-            if [[ ! -f "$folder/horizon-client" && ! -f "$folder/horizon-client.exe" ]]; then
-              echo "::error::$asset has no horizon-client"; exit 1
+            if [[ "$asset" == horizon-server-* ]]; then
+              # A server folder holds the engine (the client without audio or controllers),
+              # horizon-server and horizon-prepare (xtask package-server).
+              for program in horizon-engine horizon-server horizon-prepare; do
+                [[ -f "$folder/$program" ]] || { echo "::error::$asset has no $program"; exit 1; }
+              done
+            else
+              [[ -f "$folder/horizon-client" || -f "$folder/horizon-client.exe" ]] \
+                || { echo "::error::$asset has no horizon-client"; exit 1; }
+              [[ -f "$folder/PLAY.txt" ]] || { echo "::error::$asset has no PLAY.txt"; exit 1; }
+              [[ -f "$folder/horizon-ctl" || -f "$folder/horizon-ctl.exe" ]] \
+                || { echo "::error::$asset has no horizon-ctl"; exit 1; }
             fi
-            [[ -f "$folder/PLAY.txt" ]] || { echo "::error::$asset has no PLAY.txt"; exit 1; }
           done
           echo "stage: the launcher runs"
           chmod +x published/horizon-launcher-linux-x86_64
