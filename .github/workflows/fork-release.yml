@@ -12,10 +12,15 @@ name: fork release
 # one as the `exporters` input or ship without it (`horizon-prepare compile-exporters` then builds
 # the classes at preparation time, which needs a JDK 25 instead of a Java runtime).
 #
-#   gh workflow run "fork release"                                  # dry run: builds, publishes nothing
-#   gh workflow run "fork release" -f publish=true                  # build and publish
-#   gh workflow run "fork release" -f publish=true -f tag=v26.3-free # a tag of your own
+#   gh workflow run "fork release"                                   # dry run: builds, publishes nothing
+#   gh workflow run "fork release" -f publish=true                   # build and publish
+#   git tag fork-v1 <main commit> && git push origin fork-v1         # build and publish fork-v1
+#
+# A tag pushed whose name starts with `fork-v` is the release trigger that needs no API token:
+# the run builds that commit (it must be on main) and publishes it under the tag's own name.
 on:
+  push:
+    tags: ['fork-v*']
   workflow_dispatch:
     inputs:
       tag:
@@ -75,15 +80,21 @@ jobs:
           PLATFORMS: ${{ inputs.platforms }}
           NUMBER: ${{ github.run_number }}
           REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
           tag=${TAG:-fork-v$NUMBER}
           # The version goes into the programs (horizon_core::release): no version commits, no `v`.
           version=${VERSION:-0.2.$NUMBER}
-          [[ "" != "$tag" && "" != "$version" ]] || { echo "::error::empty tag or version"; exit 1; }
-          # A build off the default branch never publishes: a release has to name a commit on main.
           publish=$PUBLISH
-          if [[ "$REF" != refs/heads/main ]]; then
+          if [[ "$EVENT" == push ]]; then
+            # A `fork-v*` tag is the release: its name is the tag and it publishes.
+            tag=${REF#refs/tags/}
+            publish=true
+          fi
+          [[ "" != "$tag" && "" != "$version" ]] || { echo "::error::empty tag or version"; exit 1; }
+          # Nothing else off the default branch publishes: a release has to name a commit on main.
+          if [[ "$EVENT" != push && "$REF" != refs/heads/main ]]; then
             echo "::notice::$REF is not main: this run builds and publishes nothing"
             publish=false
           fi
