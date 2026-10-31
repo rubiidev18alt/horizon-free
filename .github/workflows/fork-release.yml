@@ -289,6 +289,7 @@ jobs:
         if: runner.os == 'Linux'
         # packaging/server/install.sh installs this one on a Linux VPS (docs/server.md).
         run: |
+          exec > >(tee server.log) 2>&1
           set -euo pipefail
           cargo build --release --locked -p horizon-client --no-default-features --bin horizon-client
           cargo run --locked -p xtask -- package-server target/release/horizon-client dist/horizon-server-linux-x86_64
@@ -304,6 +305,7 @@ jobs:
             package.log
             unpack.log
             imports.log
+            server.log
           if-no-files-found: ignore
           retention-days: 3
       - uses: actions/upload-artifact@v4
@@ -482,6 +484,33 @@ jobs:
             gh release create "$TAG" --target "$SHA" --title "Horizon (fork) $VERSION" --notes-file notes.md "${present[@]}"
           fi
           echo "### Published [$TAG](${{ github.server_url }}/${{ github.repository }}/releases/tag/$TAG)" >> "$GITHUB_STEP_SUMMARY"
+      - name: The published files are the ones SHA256SUMS lists
+        # Downloaded from the release (no token: they are public), so this checks what players
+        # get, not what the build folder held.
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          exec > >(tee verify.log) 2>&1
+          set -euo pipefail
+          mkdir -p published && gh release download "$TAG" --dir published
+          # SHA256SUMS lists bare names: check it where the files are. --strict fails on a
+          # mismatch, a missing file and a malformed line alike.
+          (cd published && sha256sum --check --strict SHA256SUMS)
+          # Every archive unpacks into its own folder, with the four programs in it.
+          for asset in horizon-linux-x86_64.tar.gz horizon-server-linux-x86_64.tar.gz horizon-macos-arm64.zip horizon-windows-x64.zip; do
+            rm -rf unpacked && mkdir unpacked
+            if [[ "$asset" == *.tar.gz ]]; then tar xzf "published/$asset" -C unpacked
+            else unzip -q "published/$asset" -d unpacked; fi
+            folder=$(find unpacked -mindepth 1 -maxdepth 1 -type d | head -1)
+            echo "$asset -> $folder"
+            ls "$folder" | head -12
+            test -f "$folder/horizon-client" -o -f "$folder/horizon-client.exe" || { echo "::error::$asset has no horizon-client"; exit 1; }
+            test -f "$folder/PLAY.txt" || { echo "::error::$asset has no PLAY.txt"; exit 1; }
+          done
+          # Each launcher is the program itself and runs.
+          chmod +x published/horizon-launcher-linux-x86_64
+          published/horizon-launcher-linux-x86_64 --version
+          echo "the published release checks out"
 
   report:
     # Job logs are only readable while signed in; a commit comment is not. When a build fails,
