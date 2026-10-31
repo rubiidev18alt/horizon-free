@@ -488,6 +488,7 @@ jobs:
         # Downloaded from the release (no token: they are public), so this checks what players
         # get, not what the build folder held.
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.plan.outputs.tag }}
         run: |
           exec > >(tee verify.log) 2>&1
@@ -511,12 +512,20 @@ jobs:
           chmod +x published/horizon-launcher-linux-x86_64
           published/horizon-launcher-linux-x86_64 --version
           echo "the published release checks out"
+      - name: Keep the log if the published release did not check out
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-publish
+          path: verify.log
+          if-no-files-found: ignore
+          retention-days: 3
 
   report:
     # Job logs are only readable while signed in; a commit comment is not. When a build fails,
     # this posts the first compiler errors of every platform that failed.
     needs: [plan, game, launcher]
-    if: always() && (needs.game.result == 'failure' || needs.launcher.result == 'failure')
+    if: always() && (needs.game.result == 'failure' || needs.launcher.result == 'failure' || needs.publish.result == 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
