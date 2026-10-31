@@ -14,14 +14,26 @@ Upstream's workflows are untouched: they still run (or wait for a runner) exactl
 
 ## Running it
 
+A tag is the trigger that needs no API token, and the one to prefer:
+
+```sh
+git fetch origin main && git tag fork-v1 origin/main && git push origin fork-v1
+```
+
+That builds `main`'s commit and publishes it as the release `fork-v1`. A tag of any commit that is
+not on `main` is refused: a release has to name a commit on the default branch.
+
+From the command line or the browser (**Actions → fork release → Run workflow**) a run can be
+tuned instead:
+
 ```sh
 gh workflow run "fork release"                              # build everything, publish nothing
 gh workflow run "fork release" -f publish=true              # build and publish
-gh workflow run "fork release" -f platforms=linux
+gh workflow run "fork release" -f platforms=linux           # one platform, quicker
 gh workflow run "fork release" -f publish=true -f tag=v26.3-free -f version=0.2.1
 ```
 
-In the browser: **Actions → fork release → Run workflow**. The inputs are:
+The inputs are:
 
 | Input | Default | What |
 | --- | --- | --- |
