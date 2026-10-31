@@ -64,12 +64,15 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
       version: ${{ steps.plan.outputs.version }}
       publish: ${{ steps.plan.outputs.publish }}
+      game_matrix: ${{ steps.plan.outputs.game_matrix }}
+      launcher_matrix: ${{ steps.plan.outputs.launcher_matrix }}
     steps:
       - id: plan
         env:
           TAG: ${{ inputs.tag }}
           VERSION: ${{ inputs.version }}
           PUBLISH: ${{ inputs.publish }}
+          PLATFORMS: ${{ inputs.platforms }}
           NUMBER: ${{ github.run_number }}
           REF: ${{ github.ref }}
         run: |
@@ -89,7 +92,34 @@ jobs:
             echo "version=$version"
             echo "publish=$publish"
           } >> "$GITHUB_OUTPUT"
-          echo "### $tag (version $version), publish: $publish" >> "$GITHUB_STEP_SUMMARY"
+          # The build matrices, one set of platform definitions: a job-level `if` cannot read
+          # `matrix`, so the platform chosen here is what the matrix holds.
+          python3 - "$PLATFORMS" <<'PY' >> "$GITHUB_OUTPUT"
+          import json, sys
+          platforms = sys.argv[1] or "all"
+          game = [
+              {"name": "linux", "os": "ubuntu-22.04", "dir": "horizon-linux-x86_64",
+               "asset": "horizon-linux-x86_64.tar.gz", "exe": "", "rustflags": ""},
+              {"name": "windows", "os": "windows-latest", "dir": "horizon-windows-x64",
+               "asset": "horizon-windows-x64.zip", "exe": ".exe",
+               "rustflags": "-C target-feature=+crt-static"},
+              {"name": "macOS", "os": "macos-latest", "dir": "horizon-macos-arm64",
+               "asset": "horizon-macos-arm64.zip", "exe": "", "rustflags": ""},
+          ]
+          launcher = [
+              {"name": "linux", "os": "ubuntu-22.04", "binary": "horizon-launcher",
+               "asset": "horizon-launcher-linux-x86_64.tar.gz", "rustflags": ""},
+              {"name": "windows", "os": "windows-latest", "binary": "horizon-launcher.exe",
+               "asset": "horizon-launcher-windows-x64.zip",
+               "rustflags": "-C target-feature=+crt-static"},
+              {"name": "macOS", "os": "macos-latest", "binary": "horizon-launcher",
+               "asset": "horizon-launcher-macos-arm64.zip", "rustflags": ""},
+          ]
+          picked = lambda rows: [row for row in rows if platforms in ("all", row["name"])]
+          print("game_matrix=" + json.dumps({"include": picked(game)}, separators=(",", ":")))
+          print("launcher_matrix=" + json.dumps({"include": picked(launcher)}, separators=(",", ":")))
+          PY
+          echo "### $tag (version $version), publish: $publish, platforms: $PLATFORMS" >> "$GITHUB_STEP_SUMMARY"
 
   exporters:
     # The compiled original exporter classes the release folders carry, when a run is given them.
@@ -127,24 +157,7 @@ jobs:
     name: game ${{ matrix.name }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: linux
-            os: ubuntu-22.04
-            dir: horizon-linux-x86_64
-            asset: horizon-linux-x86_64.tar.gz
-          - name: windows
-            os: windows-latest
-            dir: horizon-windows-x64
-            asset: horizon-windows-x64.zip
-            exe: .exe
-            # The C runtime linked in, so the game runs without the Visual C++ redistributable.
-            rustflags: -C target-feature=+crt-static
-          - name: macOS
-            os: macos-latest
-            dir: horizon-macos-arm64
-            asset: horizon-macos-arm64.zip
-    if: inputs.platforms == 'all' || inputs.platforms == matrix.name
+      matrix: ${{ fromJSON(needs.plan.outputs.game_matrix) }}
     runs-on: ${{ matrix.os }}
     # A release build is LTO and one codegen unit (Cargo.toml): slow to compile, slow to link.
     timeout-minutes: 180
@@ -261,22 +274,7 @@ jobs:
     name: launcher ${{ matrix.name }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: linux
-            os: ubuntu-22.04
-            asset: horizon-launcher-linux-x86_64.tar.gz
-            binary: horizon-launcher
-          - name: windows
-            os: windows-latest
-            asset: horizon-launcher-windows-x64.zip
-            binary: horizon-launcher.exe
-            rustflags: -C target-feature=+crt-static
-          - name: macOS
-            os: macos-latest
-            asset: horizon-launcher-macos-arm64.zip
-            binary: horizon-launcher
-    if: inputs.platforms == 'all' || inputs.platforms == matrix.name
+      matrix: ${{ fromJSON(needs.plan.outputs.launcher_matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     env:
