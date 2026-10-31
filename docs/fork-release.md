@@ -53,12 +53,22 @@ and `crates/horizon-prepare` sources the launcher compares, and the exporter bun
   controllers, which `packaging/server/install.sh` installs)
 - `horizon-windows-x64.zip` (the C runtime linked in)
 - `horizon-macos-arm64.zip`
-- `horizon-launcher-{linux-x86_64.tar.gz,windows-x64.zip,macos-arm64.zip}`
+- `horizon-launcher-{linux-x86_64,windows-x64.exe,macos-arm64}`, the bare programs as `launcher.yml`
+  publishes them and not archives: the launcher replaces the file it runs from when it updates itself
 - `SHA256SUMS` for all of the above
 
+A run takes about 25 minutes: the release profile is thin LTO with one codegen unit, so the Windows
+build alone is roughly 18 minutes on a hosted runner.
+
 Every build is checked the way upstream checks it: `tools/check_imports.py` (no library players may
-not have), `--help` on each program, `--version` matching the release's version, and the archive is
-unpacked again and inspected before it is uploaded.
+not have), `--help` on each program, `--version` matching the release's version, the archive unpacked
+again and inspected, and a server folder made from the engine. Once published, the release's own
+files are downloaded back, `SHA256SUMS` is verified against them, each archive is unpacked and each
+Linux launcher is run with `--version`.
+
+A failing step keeps its log (`build.log`, `package.log`, `imports.log`, `unpack.log`, `server.log`)
+and a `report` job posts the first errors of every platform that failed as a comment on the commit:
+the job logs themselves need a GitHub sign-in, and this repository has issues disabled.
 
 ## What it does not do
 
@@ -66,6 +76,9 @@ unpacked again and inspected before it is uploaded.
   right-click → Open. `SHA256SUMS` has no `SHA256SUMS.sig`: `crates/horizon-release-sign/release-keys.txt`
   holds upstream's key only, and the official launcher refuses a release it cannot verify. These
   builds are for this fork's users, not an official Horizon release.
+- **Refuse a Linux launcher's extra libraries.** `tools/check_imports.py` warns there instead, as
+  `launcher.yml` does: a program built on `ubuntu-22.04` can ask for `GLIBC_2.35` and the newer
+  libstdc++ that distributions current today have.
 - **Ship compiled exporter classes by default.** They are compiled from
   `mods/horizon/src/test/java` with `javac` against the pinned Minecraft jars, which only exist on a
   machine that has the game. Without them `horizon-prepare compile-exporters` builds them at
