@@ -227,6 +227,7 @@ jobs:
         # standard loader and the libraries every desktop distribution has.
         if: runner.os != 'macOS'
         run: |
+          exec > >(tee imports.log) 2>&1
           set -euo pipefail
           for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
             ${{ runner.os == 'Windows' && 'python' || 'python3' }} tools/check_imports.py "target/release/$binary${{ matrix.exe }}"
@@ -302,6 +303,7 @@ jobs:
             build.log
             package.log
             unpack.log
+            imports.log
           if-no-files-found: ignore
           retention-days: 3
       - uses: actions/upload-artifact@v4
@@ -372,9 +374,20 @@ jobs:
           out=$(target/release/${{ matrix.binary }} --version)
           echo "$out"
           [[ "$out" == "horizon-launcher $HORIZON_LAUNCHER_VERSION" ]] || { echo "::error::expected horizon-launcher $HORIZON_LAUNCHER_VERSION"; exit 1; }
-      - name: Only system libraries
+      - name: The libraries it needs
+        # A warning on Linux, as launcher.yml treats it: a program built on ubuntu-22.04 can ask for
+        # GLIBC_2.35 and the newer libstdc++ that distributions current today have.
         if: runner.os != 'macOS'
-        run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} ../tools/check_imports.py "target/release/${{ matrix.binary }}"
+        run: |
+          exec > >(tee imports.log) 2>&1
+          set -euo pipefail
+          if ! ${{ runner.os == 'Windows' && 'python' || 'python3' }} ../tools/check_imports.py "target/release/${{ matrix.binary }}"; then
+            if [[ "$RUNNER_OS" == Linux ]]; then
+              echo "::warning::the launcher needs libraries beyond the check's list (see imports.log)"
+            else
+              exit 1
+            fi
+          fi
       - name: Package
         # The bare program, as launcher.yml publishes it: it updates itself, and
         # self-replace replaces the file it runs from, which an archive would not.
@@ -392,6 +405,7 @@ jobs:
           path: |
             build.log
             package.log
+            imports.log
           if-no-files-found: ignore
           retention-days: 3
       - uses: actions/upload-artifact@v4
