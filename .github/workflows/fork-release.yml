@@ -200,15 +200,22 @@ jobs:
           path: exporters
       - name: Build the client, horizon-ctl, horizon-prepare and horizon-server
         run: |
-          set -o pipefail
           if cargo build --release --locked -p horizon-client --bin horizon-client --bin horizon-ctl \
-              -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server 2>&1 | tee build.log; then
+              -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server > build.log 2>&1; then
             exit 0
           fi
-          # The first errors, as annotations: they are readable without a login, unlike the log.
-          grep -E '^(error|warning: unused)' -A 4 build.log | head -80 | while IFS= read -r line; do echo "::error::$line"; done
-          tail -30 build.log
+          # A short excerpt only: a step log that big loses its annotations. The whole log is kept
+          # for the report job.
+          excerpt=$(grep -E -m 12 '^error(\[|:)' -A 5 build.log || tail -20 build.log)
+          printf '%s\n' "$excerpt" | head -60 | while IFS= read -r line; do echo "::error::$line"; done
           exit 1
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-log-${{ matrix.name }}
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Every program the release folder takes was built
         run: |
           set -euo pipefail
@@ -331,13 +338,19 @@ jobs:
           fi
       - name: Build the launcher
         run: |
-          set -o pipefail
-          if cargo build --release --locked ${LAUNCHER_FEATURES:+--features "$LAUNCHER_FEATURES"} 2>&1 | tee build.log; then
+          if cargo build --release --locked ${LAUNCHER_FEATURES:+--features "$LAUNCHER_FEATURES"} > build.log 2>&1; then
             exit 0
           fi
-          grep -E '^(error|warning: unused)' -A 4 build.log | head -80 | while IFS= read -r line; do echo "::error::$line"; done
-          tail -30 build.log
+          excerpt=$(grep -E -m 12 '^error(\[|:)' -A 5 build.log || tail -20 build.log)
+          printf '%s\n' "$excerpt" | head -60 | while IFS= read -r line; do echo "::error::$line"; done
           exit 1
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-log-launcher-${{ matrix.name }}
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 3
       - name: The version is this build's
         run: |
           set -euo pipefail
@@ -432,3 +445,48 @@ jobs:
             gh release create "$TAG" --target "$SHA" --title "Horizon (fork) $VERSION" --notes-file notes.md "${present[@]}"
           fi
           echo "### Published [$TAG](${{ github.server_url }}/${{ github.repository }}/releases/tag/$TAG)" >> "$GITHUB_STEP_SUMMARY"
+
+  report:
+    # Job logs are only readable while signed in; a commit comment is not. When a build fails,
+    # this posts the first compiler errors of every platform that failed.
+    needs: [plan, game, launcher]
+    if: always() && (needs.game.result == 'failure' || needs.launcher.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # the commit comment
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: build-log-*
+          path: logs
+      - name: The first errors of each platform
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/comment.md"
+          {
+            echo "### \`fork release\` build failed ([run]($RUN))"
+            echo
+          } > "$body"
+          for log in logs/*/build.log; do
+            [[ -f "$log" ]] || continue
+            name=$(basename "$(dirname "$log")")
+            {
+              echo "<details><summary><b>${name#build-log-}</b></summary>"
+              echo
+              echo '```'
+              grep -E -m 20 '^error(\[|:)' -A 6 "$log" | head -140 || tail -20 "$log"
+              echo '```'
+              echo
+              echo "</details>"
+              echo
+            } >> "$body"
+          done
+          # A commit comment holds 65536 characters.
+          head -c 60000 "$body" > "$body.trimmed" || true
+          gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/comments" -F body=@"$body.trimmed" > /dev/null
+          echo "posted the compiler output as a comment on $SHA"
