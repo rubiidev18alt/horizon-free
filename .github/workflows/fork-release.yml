@@ -493,22 +493,33 @@ jobs:
         run: |
           exec > >(tee verify.log) 2>&1
           set -euo pipefail
-          mkdir -p published && gh release download "$TAG" --dir published
-          # SHA256SUMS lists bare names: check it where the files are. --strict fails on a
-          # mismatch, a missing file and a malformed line alike.
-          (cd published && sha256sum --check --strict SHA256SUMS)
-          # Every archive unpacks into its own folder, with the four programs in it.
+          # Each stage announces itself, so a failure in the log says where it stopped, and no
+          # pipeline ends in `head` (a closed pipe is exit 141 under pipefail).
+          echo "stage: download the release's own files"
+          mkdir -p published
+          gh release download "$TAG" --dir published
+          ls -l published
+          echo "stage: checksums"
+          ( cd published && sha256sum --check --strict SHA256SUMS )
+          echo "stage: unpack every archive"
           for asset in horizon-linux-x86_64.tar.gz horizon-server-linux-x86_64.tar.gz horizon-macos-arm64.zip horizon-windows-x64.zip; do
             rm -rf unpacked && mkdir unpacked
-            if [[ "$asset" == *.tar.gz ]]; then tar xzf "published/$asset" -C unpacked
-            else unzip -q "published/$asset" -d unpacked; fi
-            folder=$(find unpacked -mindepth 1 -maxdepth 1 -type d | head -1)
+            if [[ "$asset" == *.tar.gz ]]; then
+              tar xzf "published/$asset" -C unpacked
+            else
+              unzip -q "published/$asset" -d unpacked
+            fi
+            folder=""
+            for candidate in unpacked/*/; do folder=${candidate%/}; break; done
+            [[ -n "$folder" ]] || { echo "::error::$asset holds no folder"; exit 1; }
             echo "$asset -> $folder"
-            ls "$folder" | head -12
-            test -f "$folder/horizon-client" -o -f "$folder/horizon-client.exe" || { echo "::error::$asset has no horizon-client"; exit 1; }
-            test -f "$folder/PLAY.txt" || { echo "::error::$asset has no PLAY.txt"; exit 1; }
+            ls "$folder"
+            if [[ ! -f "$folder/horizon-client" && ! -f "$folder/horizon-client.exe" ]]; then
+              echo "::error::$asset has no horizon-client"; exit 1
+            fi
+            [[ -f "$folder/PLAY.txt" ]] || { echo "::error::$asset has no PLAY.txt"; exit 1; }
           done
-          # Each launcher is the program itself and runs.
+          echo "stage: the launcher runs"
           chmod +x published/horizon-launcher-linux-x86_64
           published/horizon-launcher-linux-x86_64 --version
           echo "the published release checks out"
