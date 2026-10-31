@@ -245,6 +245,7 @@ jobs:
           done
       - name: Package
         run: |
+          exec > >(tee package.log) 2>&1
           set -euo pipefail
           cargo run --locked -p xtask -- package "target/release/horizon-client${{ matrix.exe }}" "dist/${{ matrix.dir }}"
           cd dist
@@ -263,6 +264,7 @@ jobs:
           ls -l "${{ matrix.asset }}"
       - name: The archive holds a playable folder
         run: |
+          exec > >(tee unpack.log) 2>&1
           set -euo pipefail
           unpacked="$RUNNER_TEMP/unpacked"
           rm -rf "$unpacked" && mkdir -p "$unpacked"
@@ -290,7 +292,19 @@ jobs:
           cargo run --locked -p xtask -- package-server target/release/horizon-client dist/horizon-server-linux-x86_64
           (cd dist && tar czf horizon-server-linux-x86_64.tar.gz horizon-server-linux-x86_64)
           ls -l dist/horizon-server-linux-x86_64.tar.gz
+      - name: Keep the logs of the steps that failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-game-${{ matrix.name }}
+          path: |
+            build.log
+            package.log
+            unpack.log
+          if-no-files-found: ignore
+          retention-days: 3
       - uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: ${{ matrix.asset }}
           path: |
@@ -362,6 +376,7 @@ jobs:
         run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} ../tools/check_imports.py "target/release/${{ matrix.binary }}"
       - name: Package
         run: |
+          exec > >(tee package.log) 2>&1
           set -euo pipefail
           mkdir -p out dist
           cp "target/release/${{ matrix.binary }}" dist/
@@ -372,7 +387,18 @@ jobs:
                fi ;;
           esac
           ls -l out
+      - name: Keep the logs of the steps that failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-launcher-${{ matrix.name }}
+          path: |
+            build.log
+            package.log
+          if-no-files-found: ignore
+          retention-days: 3
       - uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: ${{ matrix.asset }}
           path: launcher/out/${{ matrix.asset }}
@@ -458,7 +484,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: build-log-*
+          pattern: logs-*
           path: logs
       - name: The first errors of each platform
         env:
@@ -472,14 +498,16 @@ jobs:
             echo "### \`fork release\` build failed ([run]($RUN))"
             echo
           } > "$body"
-          for log in logs/*/build.log; do
+          for log in logs/*/*.log; do
             [[ -f "$log" ]] || continue
-            name=$(basename "$(dirname "$log")")
+            name=$(basename "$(dirname "$log")")/$(basename "$log")
             {
-              echo "<details><summary><b>${name#build-log-}</b></summary>"
+              echo "<details><summary><b>$name</b></summary>"
               echo
               echo '```'
-              grep -E -m 20 '^error(\[|:)' -A 6 "$log" | head -140 || tail -20 "$log"
+              grep -E -m 20 '^error(\[|:)' -A 6 "$log" | head -80 || true
+              echo '...'
+              tail -25 "$log"
               echo '```'
               echo
               echo "</details>"
