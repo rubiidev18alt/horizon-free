@@ -234,10 +234,17 @@ fn package_server(engine: &Path, out: &Path) -> Result<(), String> {
     copy_beside(engine, &SERVER_TOOLS, out)
 }
 
-/// Release builds supply only our compiled classes and their integrity manifest.
+/// Release builds supply only our compiled classes and their integrity manifest. A build without
+/// one (this fork's CI has no Minecraft to compile them from) ships without it, and `horizon-prepare`
+/// compiles the classes when it prepares instead, which needs a JDK rather than a Java runtime.
 fn copy_exporters(from: &Path, to: &Path) -> Result<(), String> {
     if !from.join("manifest.json").is_file() {
-        return Err("Missing exporters/manifest.json; run horizon-prepare compile-exporters and copy its bundle to exporters/".into());
+        eprintln!(
+            "xtask: no {}: the folder ships without the compiled exporters, which horizon-prepare \
+             then compiles while it prepares (a JDK is needed for that)",
+            from.join("manifest.json").display()
+        );
+        return Ok(());
     }
     copy_exporter_tree(from, to)
 }
