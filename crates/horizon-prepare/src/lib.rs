@@ -453,11 +453,10 @@ fn prepare_impl(options: &Options, log: Log, compile_only: bool) -> Result<PathB
                     options.server_jar.as_deref(),
                     log,
                 )?;
-            } else {
-                let found = artifacts::verify(&lock)?;
-                let libraries = artifacts::client_libraries(&lock, &found.manifest)?;
-                (found, libraries)
             }
+            let found = artifacts::verify(&lock)?;
+            let libraries = artifacts::client_libraries(&lock, &found.manifest)?;
+            (found, libraries)
         }
     };
     let local = root.join(".local");
