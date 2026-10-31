@@ -119,12 +119,12 @@ jobs:
           ]
           launcher = [
               {"name": "linux", "os": "ubuntu-22.04", "binary": "horizon-launcher",
-               "asset": "horizon-launcher-linux-x86_64.tar.gz", "rustflags": ""},
+               "asset": "horizon-launcher-linux-x86_64", "rustflags": ""},
               {"name": "windows", "os": "windows-latest", "binary": "horizon-launcher.exe",
-               "asset": "horizon-launcher-windows-x64.zip",
+               "asset": "horizon-launcher-windows-x64.exe",
                "rustflags": "-C target-feature=+crt-static"},
               {"name": "macOS", "os": "macos-latest", "binary": "horizon-launcher",
-               "asset": "horizon-launcher-macos-arm64.zip", "rustflags": ""},
+               "asset": "horizon-launcher-macos-arm64", "rustflags": ""},
           ]
           picked = lambda rows: [row for row in rows if platforms in ("all", row["name"])]
           print("game_matrix=" + json.dumps({"include": picked(game)}, separators=(",", ":")))
@@ -249,18 +249,18 @@ jobs:
           set -euo pipefail
           cargo run --locked -p xtask -- package "target/release/horizon-client${{ matrix.exe }}" "dist/${{ matrix.dir }}"
           cd dist
-          case "${{ matrix.asset }}" in
-            *.tar.gz) tar czf "${{ matrix.asset }}" "${{ matrix.dir }}" ;;
-            *) if [[ "$RUNNER_OS" == Windows ]]; then 7z a -tzip "${{ matrix.asset }}" "${{ matrix.dir }}" > /dev/null
-               else
-                 # Without resource forks and extended attributes: plain ditto adds an
-                 # AppleDouble `._` file beside every file that has any.
-                 ditto -c -k --norsrc --noextattr --noqtn --keepParent "${{ matrix.dir }}" "${{ matrix.asset }}"
-                 if unzip -Z1 "${{ matrix.asset }}" | grep -E '(^|/)(\._|__MACOSX/)'; then
-                   echo "::error::macOS metadata files in ${{ matrix.asset }}"; exit 1
-                 fi
-               fi ;;
-          esac
+          if [[ "${{ matrix.asset }}" == *.tar.gz ]]; then
+            tar czf "${{ matrix.asset }}" "${{ matrix.dir }}"
+          elif [[ "$RUNNER_OS" == Windows ]]; then
+            7z a -tzip "${{ matrix.asset }}" "${{ matrix.dir }}" > /dev/null
+          else
+            # Without resource forks and extended attributes: plain ditto adds an
+            # AppleDouble `._` file beside every file that has any.
+            ditto -c -k --norsrc --noextattr --noqtn --keepParent "${{ matrix.dir }}" "${{ matrix.asset }}"
+            if unzip -Z1 "${{ matrix.asset }}" | grep -E '(^|/)(\._|__MACOSX/)'; then
+              echo "::error::macOS metadata files in ${{ matrix.asset }}"; exit 1
+            fi
+          fi
           ls -l "${{ matrix.asset }}"
       - name: The archive holds a playable folder
         run: |
@@ -268,12 +268,13 @@ jobs:
           set -euo pipefail
           unpacked="$RUNNER_TEMP/unpacked"
           rm -rf "$unpacked" && mkdir -p "$unpacked"
-          case "${{ matrix.asset }}" in
-            *.tar.gz) tar xzf "dist/${{ matrix.asset }}" -C "$unpacked" ;;
-            *) if [[ "$RUNNER_OS" == Windows ]]; then 7z x -o"$unpacked" "dist/${{ matrix.asset }}" > /dev/null
-               else unzip -q "dist/${{ matrix.asset }}" -d "$unpacked" ;;
-               fi ;;
-          esac
+          if [[ "${{ matrix.asset }}" == *.tar.gz ]]; then
+            tar xzf "dist/${{ matrix.asset }}" -C "$unpacked"
+          elif [[ "$RUNNER_OS" == Windows ]]; then
+            7z x -o"$unpacked" "dist/${{ matrix.asset }}" > /dev/null
+          else
+            unzip -q "dist/${{ matrix.asset }}" -d "$unpacked"
+          fi
           folder="$unpacked/${{ matrix.dir }}"
           for name in horizon-client horizon-ctl horizon-prepare horizon-server; do
             test -f "$folder/$name${{ matrix.exe }}" || { echo "::error::$name is not in ${{ matrix.asset }}"; exit 1; }
@@ -375,17 +376,13 @@ jobs:
         if: runner.os != 'macOS'
         run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} ../tools/check_imports.py "target/release/${{ matrix.binary }}"
       - name: Package
+        # The bare program, as launcher.yml publishes it: it updates itself, and
+        # self-replace replaces the file it runs from, which an archive would not.
         run: |
           exec > >(tee package.log) 2>&1
           set -euo pipefail
-          mkdir -p out dist
-          cp "target/release/${{ matrix.binary }}" dist/
-          case "${{ matrix.asset }}" in
-            *.tar.gz) (cd dist && tar czf "../out/${{ matrix.asset }}" "${{ matrix.binary }}") ;;
-            *) if [[ "$RUNNER_OS" == Windows ]]; then (cd dist && 7z a "../out/${{ matrix.asset }}" "${{ matrix.binary }}" > /dev/null)
-               else (cd dist && zip -q "../out/${{ matrix.asset }}" "${{ matrix.binary }}") ;;
-               fi ;;
-          esac
+          mkdir -p out
+          cp "target/release/${{ matrix.binary }}" "out/${{ matrix.asset }}"
           ls -l out
       - name: Keep the logs of the steps that failed
         if: failure()
@@ -426,7 +423,7 @@ jobs:
           set -euo pipefail
           cd dist
           ls -l
-          sha256sum horizon-*.tar.gz horizon-*.zip > SHA256SUMS
+          sha256sum horizon-* > SHA256SUMS
           cat SHA256SUMS
       - name: The release and its files
         env:
@@ -450,15 +447,15 @@ jobs:
             echo
             echo "| Platform | Game | Launcher |"
             echo "| --- | --- | --- |"
-            echo "| Linux x86-64 | \`horizon-linux-x86_64.tar.gz\` (server: \`horizon-server-linux-x86_64.tar.gz\`) | \`horizon-launcher-linux-x86_64.tar.gz\` |"
-            echo "| Windows x64 | \`horizon-windows-x64.zip\` | \`horizon-launcher-windows-x64.zip\` |"
-            echo "| macOS (Apple Silicon) | \`horizon-macos-arm64.zip\` | \`horizon-launcher-macos-arm64.zip\` |"
+            echo "| Linux x86-64 | \`horizon-linux-x86_64.tar.gz\` (server: \`horizon-server-linux-x86_64.tar.gz\`) | \`horizon-launcher-linux-x86_64\` (make it executable) |"
+            echo "| Windows x64 | \`horizon-windows-x64.zip\` | \`horizon-launcher-windows-x64.exe\` |"
+            echo "| macOS (Apple Silicon) | \`horizon-macos-arm64.zip\` | \`horizon-launcher-macos-arm64\` (make it executable) |"
             echo
             echo "Built by run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
           } > notes.md
           assets=(dist/horizon-linux-x86_64.tar.gz dist/horizon-windows-x64.zip dist/horizon-macos-arm64.zip)
           assets+=(dist/horizon-server-linux-x86_64.tar.gz)
-          assets+=(dist/horizon-launcher-linux-x86_64.tar.gz dist/horizon-launcher-windows-x64.zip dist/horizon-launcher-macos-arm64.zip)
+          assets+=(dist/horizon-launcher-linux-x86_64 dist/horizon-launcher-windows-x64.exe dist/horizon-launcher-macos-arm64)
           assets+=(dist/SHA256SUMS)
           present=()
           for asset in "${assets[@]}"; do
