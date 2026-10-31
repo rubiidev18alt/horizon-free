@@ -509,37 +509,28 @@ jobs:
           ls -l published
           echo "stage: checksums"
           ( cd published && sha256sum --check --strict SHA256SUMS )
-          echo "stage: unpack every archive"
+          echo "stage: what every archive holds"
+          # The listings, not an extraction: no folder names to guess at.
           for asset in horizon-linux-x86_64.tar.gz horizon-server-linux-x86_64.tar.gz horizon-macos-arm64.zip horizon-windows-x64.zip; do
-            rm -rf unpacked && mkdir unpacked
+            echo "check: $asset: listing"
             if [[ "$asset" == *.tar.gz ]]; then
-              tar xzf "published/$asset" -C unpacked
+              tar tzf "published/$asset" > listing.txt
             else
-              unzip -q "published/$asset" -d unpacked
+              unzip -Z1 "published/$asset" > listing.txt
             fi
-            folder=""
-            for candidate in unpacked/*/; do folder=${candidate%/}; break; done
-            [[ -n "$folder" ]] || { echo "::error::$asset holds no folder"; exit 1; }
-            echo "$asset -> $folder"
-            ls "$folder"
-            echo "check: $asset: folder"
+            sed -n '1,12p' listing.txt
             if [[ "$asset" == horizon-server-* ]]; then
-              # A server folder holds the engine (the client without audio or controllers),
-              # horizon-server and horizon-prepare (xtask package-server).
-              for program in horizon-engine horizon-server horizon-prepare; do
-                echo "check: $asset: $program"
-                [[ -f "$folder/$program" ]] || { echo "::error::$asset has no $program"; exit 1; }
-              done
+              programs=(horizon-engine horizon-server horizon-prepare)
             else
-              echo "check: $asset: horizon-client"
-              [[ -f "$folder/horizon-client" || -f "$folder/horizon-client.exe" ]] \
-                || { echo "::error::$asset has no horizon-client"; exit 1; }
-              echo "check: $asset: PLAY.txt"
-              [[ -f "$folder/PLAY.txt" ]] || { echo "::error::$asset has no PLAY.txt"; exit 1; }
-              echo "check: $asset: horizon-ctl"
-              [[ -f "$folder/horizon-ctl" || -f "$folder/horizon-ctl.exe" ]] \
-                || { echo "::error::$asset has no horizon-ctl"; exit 1; }
+              programs=(horizon-client horizon-ctl horizon-prepare horizon-server PLAY.txt)
             fi
+            for program in "${programs[@]}"; do
+              echo "check: $asset: $program"
+              if ! grep -qE "(^|/)${program}(\\.exe)?\$" listing.txt; then
+                echo "::error::$asset holds no $program"
+                exit 1
+              fi
+            done
           done
           echo "stage: the launcher runs"
           chmod +x published/horizon-launcher-linux-x86_64
