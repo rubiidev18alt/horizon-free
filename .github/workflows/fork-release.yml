@@ -154,6 +154,9 @@ jobs:
             cp -R "$(dirname "$manifest")"/. exporters/
           else
             echo "::notice::No exporters: horizon-prepare compiles them while it prepares (that needs a JDK 25)"
+            # A marker, so the artifact exists and the game jobs' download succeeds; xtask only
+            # copies a bundle that has a manifest.json, so this never reaches a release folder.
+            echo "No exporter bundle in this build." > exporters/README.txt
           fi
           ls -la exporters
       - uses: actions/upload-artifact@v4
@@ -196,7 +199,16 @@ jobs:
           name: exporters
           path: exporters
       - name: Build the client, horizon-ctl, horizon-prepare and horizon-server
-        run: cargo build --release --locked -p horizon-client --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+        run: |
+          set -o pipefail
+          if cargo build --release --locked -p horizon-client --bin horizon-client --bin horizon-ctl \
+              -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server 2>&1 | tee build.log; then
+            exit 0
+          fi
+          # The first errors, as annotations: they are readable without a login, unlike the log.
+          grep -E '^(error|warning: unused)' -A 4 build.log | head -80 | while IFS= read -r line; do echo "::error::$line"; done
+          tail -30 build.log
+          exit 1
       - name: Every program the release folder takes was built
         run: |
           set -euo pipefail
@@ -317,7 +329,15 @@ jobs:
             echo "::notice::No Metal toolchain on this runner: GPUI compiles its shaders at run time"
             echo "LAUNCHER_FEATURES=gpui/runtime_shaders" >> "$GITHUB_ENV"
           fi
-      - run: cargo build --release --locked ${LAUNCHER_FEATURES:+--features "$LAUNCHER_FEATURES"}
+      - name: Build the launcher
+        run: |
+          set -o pipefail
+          if cargo build --release --locked ${LAUNCHER_FEATURES:+--features "$LAUNCHER_FEATURES"} 2>&1 | tee build.log; then
+            exit 0
+          fi
+          grep -E '^(error|warning: unused)' -A 4 build.log | head -80 | while IFS= read -r line; do echo "::error::$line"; done
+          tail -30 build.log
+          exit 1
       - name: The version is this build's
         run: |
           set -euo pipefail
