@@ -2,7 +2,10 @@
 > This repository is not in any way affiliated with Horizon original devs or Microsoft/Mojang.
 >
 > The goal of this fork is to return local account play with YOUR minecraft assets without Microsoft profile authentication
-> You can download it's builds in [RELEASES](https://github.com/0CYBER/horizon-free/releases/latest) section
+> Builds are published as releases of this fork: run the **fork release** workflow
+> (`gh workflow run "fork release" -f publish=true`) and its archives appear under
+> [releases](https://github.com/rubiidev18alt/horizon-free/releases); [docs/fork-release.md](docs/fork-release.md)
+> says what a run builds, and what it leaves out (signing, macOS notarization, the game's smoke test).
 >
 > Lower part of the README is fully original
 
